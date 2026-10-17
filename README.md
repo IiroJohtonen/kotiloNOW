@@ -49,6 +49,15 @@ npm run dev
 
 Käyttöliittymä aukeaa osoitteessa http://localhost:5173 ja rajapinta osoitteessa http://localhost:4000.
 
+Jos pääkäyttäjän salasana on hukassa, aseta uusi kansiossa `server` (palvelin pysäytettynä):
+
+```bash
+npm run reset-admin -- UusiSalasana1
+```
+
+Komento vaihtaa ensimmäisen pääkäyttäjän (oletuksena demo@pohjantahti-isannointi.fi) salasanan ja kytkee
+kaksivaiheisen kirjautumisen pois. Toisen käyttäjän voi antaa sähköpostilla salasanan perään.
+
 Ensimmäisellä käynnistyksellä palvelin luo esimerkkitaloyhtiön ja neljä käyttäjää. Aloitussalasana tulostuu palvelimen lokiin, ellei sitä ole annettu muuttujassa `INITIAL_PASSWORD`. Kirjaudu osoitteella `demo@pohjantahti-isannointi.fi` ja vaihda käyttäjien osoitteet ja salasanat asetuksista.
 
 ### AI

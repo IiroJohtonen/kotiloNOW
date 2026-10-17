@@ -13,6 +13,7 @@
     "typecheck": "tsc",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "backup": "tsx src/backup-cli.ts",
+    "reset-admin": "tsx src/reset-admin-cli.ts",
     "lint": "eslint ."
   },
   "dependencies": {
