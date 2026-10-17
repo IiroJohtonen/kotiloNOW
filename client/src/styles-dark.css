@@ -2298,3 +2298,23 @@
 :root[data-theme="dark"] .knowledge-view-tabs {
     border-bottom: 1px solid #384454
 }
+:root[data-theme="dark"] .dictionary code {
+    color: #9fc2e4
+}
+:root[data-theme="dark"] .dictionary-description {
+    color: #b3bbc5
+}
+:root[data-theme="dark"] .dictionary-flag {
+    color: #e4a196
+}
+:root[data-theme="dark"] .dictionary-toolbar input:not([type="checkbox"]) {
+    border: 1px solid #374353;
+    background: #252f3c;
+    color: #e0e3e7
+}
+:root[data-theme="dark"] .dictionary-toolbar button.primary,
+:root[data-theme="dark"] .dictionary-form button.primary {
+    border: 1px solid #a6b1bf;
+    background: #d6dbe1;
+    color: #19222e
+}

@@ -40,10 +40,15 @@ import { renovationsRouter } from "./routes/renovations.js";
 import { reportersRouter } from "./routes/reporters.js";
 import { reportsRouter } from "./routes/reports.js";
 import { residentsRouter } from "./routes/residents.js";
+import { sysRouter } from "./routes/sys.js";
+import { syncDictionary } from "./sys-dictionary.js";
 import { ticketActionsRouter } from "./routes/ticket-actions.js";
 import { ticketsRouter } from "./routes/tickets.js";
 import { waitlistRouter } from "./routes/waitlist.js";
 import { workOrdersRouter } from "./routes/work-orders.js";
+
+// Sanakirja täydennetään vasta, kun kaikki moduulit ovat luoneet taulunsa.
+syncDictionary();
 
 const app = express();
 
@@ -118,7 +123,7 @@ for (const router of [
   authRouter, loginCodesRouter, passwordResetRouter, officeRouter, signatureRouter, companiesRouter, gmailRouter, knowledgeRouter, residentsRouter,
   parkingRouter, bookingsRouter, bookingQueueRouter, billingRouter, portalRouter, portalFormsRouter, heatingRouter, ticketsRouter, ticketActionsRouter, inboundRouter,
   workOrdersRouter, announcementsRouter, movesRouter, waitlistRouter, reportsRouter, renovationsRouter, keysRouter,
-  metersRouter, contactRouter, searchRouter, boardRouter, reportersRouter
+  metersRouter, contactRouter, searchRouter, boardRouter, reportersRouter, sysRouter
 ]) {
   app.use("/api", router);
 }

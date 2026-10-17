@@ -4827,3 +4827,36 @@ a.button-link { display: inline-flex; align-items: center; color: inherit; text-
 /* Dokumentin näkymän välilehdet: luettu teksti / AI:n poiminnat */
 .knowledge-view-tabs { margin-top: 16px; border-bottom: 1px solid #e2e4e6; }
 .knowledge-view-tabs + .knowledge-columns { margin-top: 12px; }
+
+/* Taulut ja kentät (pääkäyttäjä): sisäiset nimet, kentät ja tietueet */
+.dictionary .back-link { border: 0; background: none; padding: 0; margin-bottom: 10px; cursor: pointer; }
+.dictionary code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #24527f; }
+.dictionary-toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 12px 0; }
+.dictionary-toolbar input[type="search"], .dictionary-query { flex: 1 1 260px; min-width: 0; }
+.dictionary-check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dictionary-check input { width: 16px; height: 16px; margin: 0; }
+.dictionary-description { display: block; margin-top: 3px; font-size: 12px; color: #7a8088; }
+.dictionary-flag { margin-left: 4px; color: #b3412f; font-weight: 700; }
+.dictionary-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.dictionary-head h2 { margin: 0; }
+.dictionary-head .secondary { flex: none; padding: 7px 12px; font-size: 12px; font-weight: 600; }
+.settings-main { min-width: 0; }
+.dictionary { min-width: 0; }
+.dictionary .table-card { overflow-x: auto; }
+.dictionary-toolbar input:not([type="checkbox"]) {
+  border: 1px solid #dfe3e7; border-radius: 10px; padding: 10px 12px; background: #fbfbfa; color: #1d2329; font-size: 13px;
+}
+.dictionary-toolbar input:not([type="checkbox"]):focus { outline: none; border-color: #3f7fbf; box-shadow: 0 0 0 3px rgba(63, 127, 191, .18); }
+.dictionary-query { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.dictionary-toolbar button.primary, .dictionary-form button.primary {
+  border: 1px solid #171c22; background: #171c22; color: white; border-radius: 8px; padding: 9px 16px; font-weight: 700; font-size: 12px;
+}
+.dictionary .card-tabs { margin: 14px 0 12px; }
+.dictionary-table td { vertical-align: top; }
+.dictionary-records-table th { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-transform: none; white-space: nowrap; }
+.dictionary-records-table td { white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.dictionary-records .table-card { overflow-x: auto; }
+.dictionary-help { font-size: 12px; margin: -4px 0 10px; }
+.dictionary-form { display: grid; gap: 10px; margin: 4px 0 8px; max-width: 560px; }
+.dictionary-choices h3 { margin: 12px 0 6px; font-size: 13px; }
+.dictionary-choices ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }

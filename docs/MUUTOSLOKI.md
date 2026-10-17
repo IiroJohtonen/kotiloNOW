@@ -3,6 +3,25 @@
 Jokaisesta päivityksestä kirjataan päivämäärä, mitä muutettiin ja miten. Testitapaukset ja niiden
 tulokset ovat testaussivulla: https://claude.ai/artifact/9ioRJQ7LnYLHtmq6WHi3ri
 
+## 17.10.2026 · Taulut ja kentät sisäisine nimineen (ServiceNow-tyyli)
+
+**Mitä muutettiin**
+- Jokaisella taululla ja kentällä on nyt oma sisäinen nimi ServiceNow'n tapaan, esim. Tehtävät = u_ticket,
+  Käyttäjät = sys_user, tehtävän käsittelijä = assigned_to ja tunniste = sys_id.
+- Määrittelyt ovat kolmessa uudessa taulussa: taulut, kentät ja valinnat. Ne näkyvät ja niitä muokataan vain pääkäyttäjänä.
+- Kentästä näkyy nimi suomeksi ja englanniksi, tyyppi (teksti, päivämäärä, kyllä/ei, valinta, viittaus toiseen tauluun),
+  pakollisuus ja tietokannan sarake.
+- Pääkäyttäjä voi muuttaa taulujen, kenttien ja valintojen nimiä ja kuvauksia. Sisäinen nimi ei muutu.
+- Taulun tietueita voi selata sisäisillä nimillä ja hakea ServiceNow'n koodatulla haulla
+  (esim. priority=urgent^ORDERBYDESCsys_created_on). Salasanoja ja kirjautumistunnisteita ei näytetä.
+- Uudet taulut ja kentät tulevat luetteloon automaattisesti palvelimen käynnistyessä. Muutokset ja tietueiden
+  katselut kirjataan lokiin.
+
+**Miten**
+- Asetukset → Isännöitsijätoimiston tiedot → Taulut ja kentät (vain pääkäyttäjä). Avaa taulu → välilehdet Kentät ja Tietueet.
+
+**Testit:** T-088–T-091
+
 ## 17.10.2026 · Lomakkeet taloyhtiön tauluihin, uusi Asetukset-sivu ja dokumentin välilehdet
 
 **Mitä muutettiin**

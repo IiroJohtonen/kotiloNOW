@@ -11,6 +11,7 @@ import { PARKING_TYPES } from "./Parking";
 import { saveAiPrompt, storedAiPrompt } from "../preferences";
 import { t } from "../i18n";
 import { setTheme, storedTheme } from "../theme";
+import { DictionarySettings } from "./Dictionary";
 import { MasterDataSettings } from "./MasterData";
 import { CollapseSection, jumpToSection } from "../components/CollapseSection";
 
@@ -59,7 +60,7 @@ const userSections = [
 ];
 
 // Isännöitsijätoimiston asetukset välilehdittäin; kunkin välilehden osiot ovat aliotsikoina.
-type OfficeTab = "office" | "security" | "ai" | "master" | "users" | "system";
+type OfficeTab = "office" | "security" | "ai" | "master" | "dictionary" | "users" | "system";
 const officeTabs: { tab: OfficeTab; label: string; sections: { id: string; label: string }[] }[] = [
   {
     tab: "office", label: t("Toimisto"), sections: [
@@ -78,6 +79,7 @@ const officeTabs: { tab: OfficeTab; label: string; sections: { id: string; label
   },
   { tab: "ai", label: t("AI"), sections: [{ id: "office-ai", label: t("AI-käyttö ja -asetukset") }] },
   { tab: "master", label: t("Perustiedot"), sections: [{ id: "master-data", label: t("Perustiedot") }] },
+  { tab: "dictionary", label: t("Taulut ja kentät"), sections: [{ id: "dictionary", label: t("Taulut ja kentät") }] },
   { tab: "users", label: t("Käyttäjät"), sections: [{ id: "users", label: t("Käyttäjät") }] },
   {
     tab: "system", label: t("Järjestelmä"), sections: [
@@ -973,6 +975,7 @@ function OfficeSettings({ onSaved }: { onSaved: () => Promise<void> }) {
       )}
 
       {officeTab === "master" && <MasterDataSettings />}
+      {officeTab === "dictionary" && <DictionarySettings />}
       {officeTab === "users" && <OfficeUsers />}
       {officeTab === "system" && (
         <>

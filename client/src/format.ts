@@ -78,6 +78,8 @@ export function actionLabel(action: string) {
     reporter_changed: t("Ilmoittaja vaihdettu"),
     board_member_deleted: t("Hallituksen tunnus poistettu"),
     resident_erased: t("Asukkaan henkilötiedot poistettu"),
+    dictionary_updated: t("Taulun tai kentän nimeä muutettu"),
+    table_records_viewed: t("Taulun tietueita katsottu"),
     retention_purge: t("Säilytysajan ylittäneet tiedot poistettu"),
     master_data_updated: t("Perustietoja muutettu"),
     sensitive_marked: t("Merkitty arkaluonteiseksi"),
