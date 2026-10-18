@@ -3,6 +3,20 @@
 Jokaisesta päivityksestä kirjataan päivämäärä, mitä muutettiin ja miten. Testitapaukset ja niiden
 tulokset ovat testaussivulla: https://claude.ai/artifact/9ioRJQ7LnYLHtmq6WHi3ri
 
+## 18.10.2026 · Suorakulmainen ulkoasu
+
+**Mitä muutettiin**
+- Kortit, taulukot, ikkunat, valikot ja muut laatikot ovat nyt suorakulmaisia pyöreiden kulmien sijaan.
+- Painikkeissa, kentissä, välilehdissä, merkeissä ja laskureissa on vain hyvin pieni (2 px) pyöristys;
+  pillerin muotoiset merkit ja laskurit ovat suorakaiteita.
+- Pyöreiksi jäivät vain käyttäjäkuvakkeet ja pienet tilapisteet; kytkimen nuppi on nelikulmainen.
+- Muutos koskee henkilökunnan näkymiä, asukasportaalia ja tummaa tilaa.
+
+**Miten**
+- Koko sovellus: esim. Päätösjono, tehtäväkortti, Asetukset ja kirjautumissivu.
+
+**Testit:** T-117
+
 ## 18.10.2026 · Omat u_-kentät ServiceNow'n tapaan
 
 **Mitä muutettiin**
