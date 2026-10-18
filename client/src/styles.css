@@ -4860,3 +4860,13 @@ a.button-link { display: inline-flex; align-items: center; color: inherit; text-
 .dictionary-form { display: grid; gap: 10px; margin: 4px 0 8px; max-width: 560px; }
 .dictionary-choices h3 { margin: 12px 0 6px; font-size: 13px; }
 .dictionary-choices ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.dictionary-saved { margin: 0 0 10px; color: #23683a; font-size: 13px; font-weight: 600; }
+.dictionary-record-form { margin-top: 0; }
+.dictionary-record-form h3 { margin: 0; font-size: 15px; }
+.dictionary-record-form .back-link { flex: none; }
+.dictionary-record-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px 18px; }
+.dictionary-record-fields label > span code { margin-left: 4px; font-weight: 400; color: #7a8088; }
+.dictionary-record-fields label:has(textarea) { grid-column: 1 / -1; }
+.dictionary-record-check { align-self: end; padding-bottom: 10px; font-size: 12px; font-weight: 700; color: #4b535d; }
+.dictionary-toolbar .secondary { padding: 9px 14px; font-size: 12px; font-weight: 600; }
+.dictionary-record-fields input:disabled { background: #f1f2f3; color: #6b7280; }

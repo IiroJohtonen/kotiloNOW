@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { db } from "./db.js";
 
 // ---------------------------------------------------------------------------------------------
@@ -54,6 +55,13 @@ CREATE TABLE IF NOT EXISTS sys_choice (
   PRIMARY KEY(table_name, element, value)
 );
 `);
+
+// Vain luku -merkinnät lisättiin myöhemmin: taulu tai kenttä, jota ei voi muokata tietueiden muokkauksessa.
+for (const table of ["sys_db_object", "sys_dictionary"]) {
+  if (!(db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(column => column.name === "read_only")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0`);
+  }
+}
 
 // Tietokannan taulu → [sisäinen nimi, nimi, nimi englanniksi, kuvaus]. sys_-alkuiset ovat järjestelmän
 // omia tauluja (käyttäjät, istunnot, loki), u_-alkuiset isännöinnin tietoja kuten ServiceNow'n omat taulut.
@@ -393,6 +401,18 @@ const ELEMENT_NAMES: Record<string, string> = {
 const SECRET_PATTERN = /(^|_)(password|token|secret)(_|$)|_hash$/;
 const SECRET_COLUMNS = new Set(["gmail_accounts.settings"]);
 
+// Taulut, joiden tietueita ei muokata täältä: loki, kirjautumiset ja tunnisteet, sähköpostin kirjanpito ja
+// taulut, joilla on oma tarkistettu näkymänsä (käyttäjät, perustiedot, sanakirja). Myös taulut, joilla ei ole
+// yhden sarakkeen perusavainta, ovat vain luku.
+const READ_ONLY_TABLES = new Set([
+  "audit_log", "sessions", "board_sessions", "resident_sessions", "password_resets", "login_challenges", "trusted_devices",
+  "resident_credentials", "gmail_accounts", "gmail_imports", "gmail_sync_state", "deleted_mail_messages", "form_imports",
+  "ai_usage", "ai_budget_notices", "reminder_log", "users", "master_data", "erasure_pending", "system_alerts",
+  "sys_db_object", "sys_dictionary", "sys_choice"
+]);
+// Kentät, jotka järjestelmä täyttää itse: luontitiedot ja päivitysaika.
+const AUTOMATIC_COLUMNS = new Set(["created_at", "created_by", "updated_at"]);
+
 const JSON_COLUMNS = new Set([
   "prices", "rows", "fields", "topics", "covered", "config", "pages", "comparison", "new_residents", "details",
   "settings", "record_ids", "master_data.value"
@@ -450,12 +470,13 @@ const CHOICES: Record<string, [string, string, string][]> = {
 
 export type SysTable = {
   name: string; physical_name: string; label: string; label_en: string; description: string; is_system: number; active: number;
+  read_only: number;
 };
 
 export type SysField = {
   table_name: string; element: string; column_name: string; label: string; label_en: string; description: string;
   internal_type: string; reference: string | null; mandatory: number; primary_key: number; default_value: string | null;
-  secret: number; position: number; active: number;
+  secret: number; position: number; active: number; read_only: number;
 };
 
 type ColumnInfo = { name: string; type: string; notnull: number; dflt_value: string | null; pk: number };
@@ -503,20 +524,22 @@ export function syncDictionary() {
           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
         `).run(name, physical, label, labelEn, description, name.startsWith("sys_") ? 1 : 0, stamp, stamp);
       }
-      db.prepare("UPDATE sys_db_object SET active = 1 WHERE name = ?").run(name);
+      const keyColumns = (db.prepare(`PRAGMA table_info("${physical}")`).all() as ColumnInfo[]).filter(column => column.pk).length;
+      db.prepare("UPDATE sys_db_object SET active = 1, read_only = ? WHERE name = ?")
+        .run(READ_ONLY_TABLES.has(physical) || keyColumns !== 1 ? 1 : 0, name);
       internalByPhysical.set(physical, name);
     }
 
     const upsertField = db.prepare(`
       INSERT INTO sys_dictionary
         (table_name, element, column_name, label, label_en, internal_type, reference, mandatory, primary_key, default_value,
-         secret, position, active, created_at, updated_at)
+         secret, read_only, position, active, created_at, updated_at)
       VALUES (@table, @element, @column, @label, @labelEn, @type, @reference, @mandatory, @primaryKey, @defaultValue,
-         @secret, @position, 1, @stamp, @stamp)
+         @secret, @readOnly, @position, 1, @stamp, @stamp)
       ON CONFLICT(table_name, column_name) DO UPDATE SET
         internal_type = excluded.internal_type, reference = excluded.reference, mandatory = excluded.mandatory,
         primary_key = excluded.primary_key, default_value = excluded.default_value, secret = excluded.secret,
-        position = excluded.position, active = 1
+        read_only = excluded.read_only, position = excluded.position, active = 1
     `);
     for (const physical of physicalTables) {
       const table = internalByPhysical.get(physical)!;
@@ -546,6 +569,8 @@ export function syncDictionary() {
           primaryKey: column.pk ? 1 : 0,
           defaultValue: column.dflt_value === null ? null : column.dflt_value.replace(/^'(.*)'$/, "$1"),
           secret: SECRET_PATTERN.test(column.name) || SECRET_COLUMNS.has(`${physical}.${column.name}`) ? 1 : 0,
+          readOnly: column.pk || AUTOMATIC_COLUMNS.has(column.name) || SECRET_PATTERN.test(column.name)
+            || SECRET_COLUMNS.has(`${physical}.${column.name}`) ? 1 : 0,
           position: index,
           stamp
         });
@@ -640,4 +665,105 @@ export function toRecord(fields: SysField[], row: Record<string, unknown>) {
     if (!field.secret) record[field.element] = row[field.column_name] ?? null;
   }
   return record;
+}
+
+// Kenttä, jonka arvo kuvaa tietueen (ServiceNow'n display-kenttä): nimi, otsikko, aihe tai vastaava.
+const DISPLAY_ELEMENTS = ["name", "title", "subject", "label", "apartment_number", "holder_name", "code", "email", "contractor_name", "key"];
+
+export function displayField(fields: SysField[]) {
+  return DISPLAY_ELEMENTS.map(element => fields.find(field => field.element === element && !field.secret)).find(Boolean)
+    ?? fields.find(field => field.primary_key);
+}
+
+// Tietueen avain: yhden sarakkeen perusavain (yleensä sys_id).
+export function keyField(fields: SysField[]) {
+  const keys = fields.filter(field => field.primary_key);
+  return keys.length === 1 ? keys[0] : undefined;
+}
+
+export class RecordError extends Error {}
+
+// Tarkistaa muokattavat arvot kenttien tyypin mukaan ja palauttaa ne tietokannan sarakkeina. Uudessa
+// tietueessa pakolliset kentät ilman oletusarvoa pitää antaa; tunniste sys_id luodaan automaattisesti.
+export function recordValues(
+  table: SysTable, fields: SysField[], input: Record<string, unknown>, mode: "create" | "update", actor: string
+) {
+  const byElement = new Map(fields.map(field => [field.element, field]));
+  const values = new Map<string, unknown>();
+  for (const [element, raw] of Object.entries(input)) {
+    const field = byElement.get(element);
+    if (!field) throw new RecordError(`Tuntematon kenttä: ${element}`);
+    const settable = !field.read_only || (mode === "create" && field.primary_key && field.internal_type !== "sys_id" && !field.secret);
+    if (!settable) throw new RecordError(`Kenttää ${element} ei voi muuttaa.`);
+    values.set(field.column_name, fieldValue(table, field, raw));
+  }
+  const stamp = new Date().toISOString();
+  const has = (column: string) => fields.some(field => field.column_name === column);
+  if (mode === "create") {
+    const key = keyField(fields);
+    if (key?.internal_type === "sys_id") values.set(key.column_name, `${table.name.replace(/^(u|sys)_/, "").replace(/_/g, "-")}-${crypto.randomUUID()}`);
+    if (has("created_at")) values.set("created_at", stamp);
+    if (has("created_by")) values.set("created_by", actor);
+    for (const field of fields) {
+      const missing = !values.has(field.column_name) || values.get(field.column_name) === null;
+      if (field.mandatory && field.default_value === null && missing) {
+        throw new RecordError(`Pakollinen kenttä puuttuu: ${field.element}`);
+      }
+    }
+  }
+  if (has("updated_at")) values.set("updated_at", stamp);
+  return values;
+}
+
+function fieldValue(table: SysTable, field: SysField, raw: unknown): unknown {
+  const empty = raw === null || raw === undefined || raw === "";
+  if (empty) {
+    if (field.mandatory && !["string", "json"].includes(field.internal_type)) throw new RecordError(`Pakollinen kenttä puuttuu: ${field.element}`);
+    if (field.mandatory) return field.internal_type === "json" ? (field.default_value ?? "{}") : "";
+    return null;
+  }
+  const text = String(raw).trim();
+  switch (field.internal_type) {
+    case "boolean":
+      if (typeof raw === "boolean") return raw ? 1 : 0;
+      if (["1", "true"].includes(text)) return 1;
+      if (["0", "false"].includes(text)) return 0;
+      throw new RecordError(`Kentän ${field.element} arvon pitää olla kyllä tai ei.`);
+    case "integer":
+      if (!/^-?\d+$/.test(text)) throw new RecordError(`Kentän ${field.element} arvon pitää olla kokonaisluku.`);
+      return Number(text);
+    case "decimal":
+      if (text === "" || Number.isNaN(Number(text.replace(",", ".")))) throw new RecordError(`Kentän ${field.element} arvon pitää olla luku.`);
+      return Number(text.replace(",", "."));
+    case "glide_date":
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(text))) throw new RecordError(`Kentän ${field.element} arvon pitää olla päivämäärä (VVVV-KK-PP).`);
+      return text;
+    case "glide_date_time":
+      if (Number.isNaN(Date.parse(text))) throw new RecordError(`Kentän ${field.element} arvon pitää olla päivämäärä ja aika.`);
+      return new Date(text).toISOString();
+    case "json":
+      try {
+        JSON.parse(text);
+      } catch {
+        throw new RecordError(`Kentän ${field.element} arvo ei ole kelvollista JSONia.`);
+      }
+      return text;
+    case "choice": {
+      const allowed = (db.prepare("SELECT value FROM sys_choice WHERE table_name = ? AND element = ?").all(table.name, field.element) as
+        { value: string }[]).map(row => row.value);
+      if (allowed.length && !allowed.includes(text)) throw new RecordError(`Kentän ${field.element} arvo ei ole sallittu valinta.`);
+      return text;
+    }
+    case "reference": {
+      const target = getTable(field.reference ?? "");
+      const key = target && keyField(getFields(target.name));
+      if (!target || !key || !db.prepare(`SELECT 1 FROM "${target.physical_name}" WHERE "${key.column_name}" = ?`).get(text)) {
+        throw new RecordError(`Kentän ${field.element} viittaamaa tietuetta ei löytynyt.`);
+      }
+      return text;
+    }
+    default:
+      if (text.length > 20000) throw new RecordError(`Kentän ${field.element} arvo on liian pitkä.`);
+      return typeof raw === "string" ? raw : text;
+  }
 }

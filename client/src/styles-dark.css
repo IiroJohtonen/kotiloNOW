@@ -2318,3 +2318,16 @@
     background: #d6dbe1;
     color: #19222e
 }
+:root[data-theme="dark"] .dictionary-saved {
+    color: #a6e1ba
+}
+:root[data-theme="dark"] .dictionary-record-fields label > span code {
+    color: #b3bbc5
+}
+:root[data-theme="dark"] .dictionary-record-check {
+    color: #c8ced6
+}
+:root[data-theme="dark"] .dictionary-record-fields input:disabled {
+    background: #1f2732;
+    color: #b8c0ca
+}

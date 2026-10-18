@@ -3,6 +3,23 @@
 Jokaisesta päivityksestä kirjataan päivämäärä, mitä muutettiin ja miten. Testitapaukset ja niiden
 tulokset ovat testaussivulla: https://claude.ai/artifact/9ioRJQ7LnYLHtmq6WHi3ri
 
+## 18.10.2026 · Tietueiden muokkaus ja luonti Taulut ja kentät -näkymässä
+
+**Mitä muutettiin**
+- Pääkäyttäjä voi muokata taulun tietuetta suoraan: rivi avautuu lomakkeeksi, jossa jokaisella kentällä on nimi ja sisäinen nimi.
+- Lomakkeen kentät ovat tyypin mukaisia: kyllä/ei-valintaruutu, valintalista, päivämäärä, luku ja viittauskenttä,
+  josta tietueen voi hakea nimellä.
+- Uusi tietue -painike luo rivin. Tunniste ja luontiaika tulevat automaattisesti, ja pakolliset kentät tarkistetaan.
+- Arvot tarkistetaan ennen tallennusta: väärä valinta, päivämäärä tai olematon viittaus antaa virheen.
+- Lokia, kirjautumistietoja, käyttäjätunnuksia, perustietoja ja sanakirjaa ei voi muokata täältä. Tunniste,
+  luontitiedot ja salaiset kentät ovat vain luku.
+- Jokainen muokkaus ja luonti kirjataan lokiin.
+
+**Miten**
+- Asetukset → Isännöitsijätoimiston tiedot → Taulut ja kentät → avaa taulu → Tietueet → paina riviä tai Uusi tietue.
+
+**Testit:** T-092–T-095
+
 ## 17.10.2026 · Taulut ja kentät sisäisine nimineen (ServiceNow-tyyli)
 
 **Mitä muutettiin**

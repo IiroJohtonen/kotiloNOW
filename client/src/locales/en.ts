@@ -2069,5 +2069,20 @@ export const en: Record<string, string> = {
   "Tarkista taulun tiedot.": "Check the table details.",
   "Tarkista kentän tiedot.": "Check the field details.",
   "Tarkista valinnan nimi.": "Check the choice label.",
-  "Tietuetta ei löytynyt.": "Record not found."
+  "Tietuetta ei löytynyt.": "Record not found.",
+  "Tietue luotu.": "Record created.",
+  "Muutokset tallennettu.": "Changes saved.",
+  "Uusi tietue": "New record",
+  "Avaa tietue muokattavaksi painamalla riviä.": "Click a row to edit the record.",
+  "Tämän taulun tietueita ei voi muokata täällä.": "Records in this table cannot be edited here.",
+  "Muokkaa tietuetta": "Edit record",
+  "← Takaisin tietueisiin": "← Back to records",
+  "Luo tietue": "Create record",
+  "Hae nimellä tai tunnisteella": "Search by name or ID",
+  "Samalla tunnisteella on jo tietue.": "A record with the same ID already exists.",
+  "Tietueen arvot eivät kelpaa tietokannalle.": "The record's values are not valid for the database.",
+  "Anna muutettavat kentät.": "Give the fields to change.",
+  "Virheellinen tietue.": "Invalid record.",
+  "Taulun tietue luotu": "Table record created",
+  "Taulun tietuetta muokattu": "Table record edited"
 };

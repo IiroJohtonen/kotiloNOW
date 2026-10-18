@@ -9,6 +9,9 @@ type SysTable = {
   labelEn: string;
   description: string;
   isSystem: number | boolean;
+  readOnly?: boolean;
+  keyField?: string | null;
+  displayField?: string | null;
   fieldCount?: number;
   rowCount?: number;
 };
@@ -25,6 +28,7 @@ type SysField = {
   primaryKey: boolean;
   defaultValue: string | null;
   secret: boolean;
+  readOnly: boolean;
 };
 
 type SysChoice = { element: string; value: string; label: string; labelEn: string; sequence: number };
@@ -288,7 +292,7 @@ function TableView({ name, onBack, onOpen, onRenamed }: {
           </table>
         </div>
       ) : (
-        <RecordList table={table.name} fields={fields} />
+        <RecordList table={table} fields={fields} choices={choices} />
       )}
     </div>
   );
@@ -384,25 +388,48 @@ function ChoiceList({ table, choices, onSaved }: {
 const PAGE_SIZE = 20;
 
 // Taulun tietueet sisäisillä kenttänimillä. Haku on ServiceNow'n koodattu haku, esim. status=open^priority=urgent.
-function RecordList({ table, fields }: { table: string; fields: SysField[] }) {
+// Muokattavan taulun rivi avaa tietueen lomakkeeseen, ja Uusi tietue luo rivin.
+function RecordList({ table, fields, choices }: { table: SysTable; fields: SysField[]; choices: SysChoice[] }) {
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [records, setRecords] = useState<Records | null>(null);
   const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+  // null = lomake kiinni, "new" = uusi tietue, muuten muokattava tietue.
+  const [editing, setEditing] = useState<Record<string, unknown> | "new" | null>(null);
+  const [savedMessage, setSavedMessage] = useState("");
 
   useEffect(() => {
     setError("");
     const params = new URLSearchParams({ sysparm_query: query, sysparm_limit: String(PAGE_SIZE), sysparm_offset: String(offset) });
-    api<Records>(`/now/table/${encodeURIComponent(table)}?${params}`)
+    api<Records>(`/now/table/${encodeURIComponent(table.name)}?${params}`)
       .then(setRecords)
       .catch(caught => {
         setRecords(null);
         setError(errorMessage(caught, t("Tietueiden lataus epäonnistui.")));
       });
-  }, [table, query, offset]);
+  }, [table.name, query, offset, reload]);
 
   const columns = fields.filter(field => !field.secret);
+  const editable = !table.readOnly && !!table.keyField;
+
+  if (editing) {
+    return (
+      <RecordForm
+        table={table}
+        fields={fields}
+        choices={choices}
+        record={editing === "new" ? null : editing}
+        onClose={() => setEditing(null)}
+        onSaved={created => {
+          setSavedMessage(created ? t("Tietue luotu.") : t("Muutokset tallennettu."));
+          setEditing(null);
+          setReload(count => count + 1);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="dictionary-records">
@@ -422,10 +449,18 @@ function RecordList({ table, fields }: { table: string; fields: SysField[] }) {
           className="dictionary-query"
         />
         <button className="primary" type="submit">{t("Hae")}</button>
+        {editable && (
+          <button type="button" className="secondary" onClick={() => { setSavedMessage(""); setEditing("new"); }}>
+            {t("Uusi tietue")}
+          </button>
+        )}
       </form>
       <p className="muted dictionary-help">
         {t("Ehdot erotetaan merkillä ^. Vertailut: = != > < LIKE STARTSWITH ISEMPTY ISNOTEMPTY, järjestys ORDERBY tai ORDERBYDESC ja kentän sisäinen nimi.")}
+        {" "}
+        {editable ? t("Avaa tietue muokattavaksi painamalla riviä.") : t("Tämän taulun tietueita ei voi muokata täällä.")}
       </p>
+      {savedMessage && <p className="dictionary-saved">{savedMessage}</p>}
       {error && <p className="send-error">{error}</p>}
       {records && (
         <>
@@ -440,7 +475,14 @@ function RecordList({ table, fields }: { table: string; fields: SysField[] }) {
               </thead>
               <tbody>
                 {records.result.map((record, index) => (
-                  <tr key={String(record.sys_id ?? index)}>
+                  <tr
+                    key={String(record[table.keyField ?? "sys_id"] ?? index)}
+                    className={editable ? "clickable" : undefined}
+                    tabIndex={editable ? 0 : undefined}
+                    title={editable ? t("Muokkaa tietuetta") : undefined}
+                    onClick={editable ? () => { setSavedMessage(""); setEditing(record); } : undefined}
+                    onKeyDown={editable ? event => { if (event.key === "Enter") { setSavedMessage(""); setEditing(record); } } : undefined}
+                  >
                     {columns.map(field => (
                       <td key={field.element}>{formatValue(record[field.element])}</td>
                     ))}
@@ -469,6 +511,187 @@ function RecordList({ table, fields }: { table: string; fields: SysField[] }) {
         </>
       )}
     </div>
+  );
+}
+
+// Pitkät tekstikentät näytetään monirivisinä.
+const LONG_TEXT = new Set(["body", "content", "summary", "description", "draft", "note", "details", "message", "ai_reason", "decision_note", "template"]);
+
+type FormValue = string | boolean;
+
+// Tietokannan arvo lomakkeen kentäksi: kyllä/ei valintaruuduksi ja aikaleima paikalliseksi ajaksi.
+function toFormValue(field: SysField, value: unknown): FormValue {
+  if (field.type === "boolean") return value === 1 || value === true || value === "1";
+  if (value === null || value === undefined) return "";
+  if (field.type === "glide_date_time") {
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) return String(value);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 16);
+  }
+  return String(value);
+}
+
+function fromFormValue(field: SysField, value: FormValue): unknown {
+  if (field.type === "boolean") return Boolean(value);
+  if (field.type === "glide_date_time" && value) {
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? value : date.toISOString();
+  }
+  return value;
+}
+
+function RecordForm({ table, fields, choices, record, onClose, onSaved }: {
+  table: SysTable;
+  fields: SysField[];
+  choices: SysChoice[];
+  record: Record<string, unknown> | null;
+  onClose: () => void;
+  onSaved: (created: boolean) => void;
+}) {
+  const creating = record === null;
+  // Uudessa tietueessa ei näytetä kenttiä, jotka järjestelmä täyttää (tunniste, luonti- ja päivitysaika).
+  const visible = fields.filter(field => !field.secret
+    && (!creating || !field.readOnly || (field.primaryKey && field.type !== "sys_id")));
+  const initial = Object.fromEntries(visible.map(field => [
+    field.element,
+    creating ? (field.type === "boolean" ? field.defaultValue === "1" : "") : toFormValue(field, record[field.element])
+  ])) as Record<string, FormValue>;
+  const [values, setValues] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const keyValue = record && table.keyField ? String(record[table.keyField]) : "";
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const editableFields = visible.filter(field => !field.readOnly || (creating && field.primaryKey));
+    const changed = editableFields.filter(field => creating ? values[field.element] !== "" : values[field.element] !== initial[field.element]);
+    if (!creating && changed.length === 0) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const body = Object.fromEntries(changed.map(field => [field.element, fromFormValue(field, values[field.element])]));
+      await api(creating
+        ? `/now/table/${encodeURIComponent(table.name)}`
+        : `/now/table/${encodeURIComponent(table.name)}/${encodeURIComponent(keyValue)}`, {
+        method: creating ? "POST" : "PATCH",
+        body: JSON.stringify(body)
+      });
+      onSaved(creating);
+    } catch (caught) {
+      setError(errorMessage(caught, t("Tallennus epäonnistui.")));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const set = (element: string, value: FormValue) => setValues(current => ({ ...current, [element]: value }));
+
+  return (
+    <form className="ticket-form dictionary-record-form" onSubmit={submit}>
+      <div className="dictionary-head">
+        <div>
+          <h3>{creating ? t("Uusi tietue") : t("Muokkaa tietuetta")}</h3>
+          {!creating && <p className="muted"><code>{table.name}</code> · <code>{keyValue}</code></p>}
+        </div>
+        <button type="button" className="back-link" onClick={onClose}>{t("← Takaisin tietueisiin")}</button>
+      </div>
+      <div className="dictionary-record-fields">
+        {visible.map(field => {
+          const value = values[field.element];
+          const locked = field.readOnly && !(creating && field.primaryKey);
+          const fieldChoices = choices.filter(choice => choice.element === field.element);
+          const id = `record-${field.element}`;
+          const caption = (
+            <span>
+              {labelOf(field)}{field.mandatory && !locked && field.defaultValue === null ? " *" : ""} <code>{field.element}</code>
+            </span>
+          );
+          if (field.type === "boolean") {
+            return (
+              <label key={field.element} className="dictionary-check dictionary-record-check">
+                <input type="checkbox" checked={Boolean(value)} disabled={locked} onChange={event => set(field.element, event.target.checked)} />
+                {caption}
+              </label>
+            );
+          }
+          let input;
+          if (locked) {
+            input = <input id={id} value={String(value) || "–"} disabled />;
+          } else if (fieldChoices.length > 0) {
+            const options = fieldChoices.some(choice => choice.value === value) || value === "" ? fieldChoices
+              : [...fieldChoices, { element: field.element, value: String(value), label: String(value), labelEn: String(value), sequence: 999 }];
+            input = (
+              <select id={id} value={String(value)} onChange={event => set(field.element, event.target.value)}>
+                <option value="">{field.mandatory ? t("Valitse") : "–"}</option>
+                {options.map(choice => <option key={choice.value} value={choice.value}>{labelOf(choice)} ({choice.value})</option>)}
+              </select>
+            );
+          } else if (field.type === "reference" && field.reference) {
+            input = <ReferenceInput id={id} table={field.reference} value={String(value)} onChange={next => set(field.element, next)} />;
+          } else if (field.type === "json" || LONG_TEXT.has(field.element) || String(value).length > 80) {
+            input = <textarea id={id} value={String(value)} rows={field.type === "json" ? 4 : 3} onChange={event => set(field.element, event.target.value)} />;
+          } else {
+            const type = field.type === "glide_date" ? "date"
+              : field.type === "glide_date_time" ? "datetime-local"
+              : field.type === "integer" || field.type === "decimal" ? "number" : "text";
+            input = (
+              <input
+                id={id}
+                type={type}
+                step={field.type === "decimal" ? "any" : undefined}
+                value={String(value)}
+                onChange={event => set(field.element, event.target.value)}
+              />
+            );
+          }
+          return (
+            <label key={field.element} htmlFor={id}>
+              {caption}
+              {input}
+            </label>
+          );
+        })}
+      </div>
+      {error && <p className="send-error">{error}</p>}
+      <div className="draft-actions">
+        <button className="primary" type="submit" disabled={saving}>
+          {saving ? t("Tallennetaan…") : creating ? t("Luo tietue") : t("Tallenna")}
+        </button>
+        <button type="button" className="secondary" onClick={onClose}>{t("Peruuta")}</button>
+      </div>
+    </form>
+  );
+}
+
+// Viittauskenttä: kirjoitetaan tunniste tai haetaan tietue nimellä; vaihtoehdot tulevat viitatusta taulusta.
+function ReferenceInput({ id, table, value, onChange }: { id: string; table: string; value: string; onChange: (value: string) => void }) {
+  const [options, setOptions] = useState<{ value: string; label: string }[]>([]);
+  const listId = `${id}-options`;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      api<{ value: string; label: string }[]>(`/sys/tables/${encodeURIComponent(table)}/options?q=${encodeURIComponent(value)}`)
+        .then(setOptions)
+        .catch(() => setOptions([]));
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [table, value]);
+
+  const selected = options.find(option => option.value === value);
+  return (
+    <>
+      <input id={id} list={listId} value={value} onChange={event => onChange(event.target.value)} placeholder={t("Hae nimellä tai tunnisteella")} />
+      <datalist id={listId}>
+        {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </datalist>
+      <small className="dictionary-description">
+        → <code>{table}</code>{selected && selected.label !== selected.value ? ` · ${selected.label}` : ""}
+      </small>
+    </>
   );
 }
 

@@ -2,7 +2,9 @@ import express, { type Router } from "express";
 import { z } from "zod";
 import { requireAdmin } from "../auth.js";
 import { db } from "../db.js";
-import { buildQuery, getFields, getTable, QueryError, type SysTable, toRecord } from "../sys-dictionary.js";
+import {
+  buildQuery, displayField, getFields, getTable, keyField, QueryError, RecordError, recordValues, type SysTable, toRecord
+} from "../sys-dictionary.js";
 import { id, now } from "../util.js";
 
 export const sysRouter: Router = express.Router();
@@ -41,7 +43,7 @@ function tableOr404(req: express.Request, res: express.Response): SysTable | und
 const fieldJson = (field: ReturnType<typeof getFields>[number]) => ({
   element: field.element, columnName: field.column_name, label: field.label, labelEn: field.label_en,
   description: field.description, type: field.internal_type, reference: field.reference, mandatory: !!field.mandatory,
-  primaryKey: !!field.primary_key, defaultValue: field.default_value, secret: !!field.secret
+  primaryKey: !!field.primary_key, defaultValue: field.default_value, secret: !!field.secret, readOnly: !!field.read_only
 });
 
 sysRouter.get("/sys/tables/:table", requireAdmin, (req, res) => {
@@ -50,12 +52,14 @@ sysRouter.get("/sys/tables/:table", requireAdmin, (req, res) => {
   const choices = db.prepare(`
     SELECT element, value, label, label_en AS labelEn, sequence FROM sys_choice WHERE table_name = ? ORDER BY element, sequence
   `).all(table.name);
+  const fields = getFields(table.name);
   res.json({
     table: {
       name: table.name, physicalName: table.physical_name, label: table.label, labelEn: table.label_en,
-      description: table.description, isSystem: !!table.is_system
+      description: table.description, isSystem: !!table.is_system, readOnly: !!table.read_only,
+      keyField: keyField(fields)?.element ?? null, displayField: displayField(fields)?.element ?? null
     },
-    fields: getFields(table.name).map(fieldJson),
+    fields: fields.map(fieldJson),
     choices
   });
 });
@@ -139,11 +143,96 @@ sysRouter.get("/now/table/:table/:sysId", requireAdmin, (req, res) => {
   const table = tableOr404(req, res);
   if (!table) return;
   const fields = getFields(table.name);
-  const key = fields.find(field => field.element === "sys_id");
-  if (!key) return res.status(404).json({ error: "Taulun tietueilla ei ole tunnistetta sys_id." });
-  const row = db.prepare(`SELECT * FROM "${table.physical_name}" WHERE "${key.column_name}" = ?`).get(req.params.sysId) as
+  const key = keyField(fields);
+  if (!key) return res.status(404).json({ error: "Taulun tietueilla ei ole yksilöivää tunnistetta." });
+  const keyValue = key.internal_type === "integer" ? Number(req.params.sysId) : req.params.sysId;
+  const row = db.prepare(`SELECT * FROM "${table.physical_name}" WHERE "${key.column_name}" = ?`).get(keyValue) as
     Record<string, unknown> | undefined;
   if (!row) return res.status(404).json({ error: "Tietuetta ei löytynyt." });
   audit(actorName(res), "table_records_viewed", { table: table.name, sysId: req.params.sysId });
   res.json({ result: toRecord(fields, row) });
+});
+
+// Viittauskentän vaihtoehdot: tietueen tunniste ja sitä kuvaava arvo (nimi, otsikko tms.), haku osamerkkijonolla.
+sysRouter.get("/sys/tables/:table/options", requireAdmin, (req, res) => {
+  const table = tableOr404(req, res);
+  if (!table) return;
+  const fields = getFields(table.name);
+  const key = keyField(fields);
+  if (!key) return res.json([]);
+  const display = displayField(fields) ?? key;
+  const search = String(req.query.q ?? "").trim().replace(/[\\%_]/g, character => `\\${character}`);
+  const rows = db.prepare(`
+    SELECT "${key.column_name}" AS value, "${display.column_name}" AS label FROM "${table.physical_name}"
+    WHERE ? = '' OR "${display.column_name}" LIKE ? ESCAPE '\\' OR "${key.column_name}" LIKE ? ESCAPE '\\'
+    ORDER BY 2 LIMIT 50
+  `).all(search, `%${search}%`, `%${search}%`) as { value: unknown; label: unknown }[];
+  res.json(rows.map(row => ({ value: String(row.value), label: String(row.label ?? row.value) })));
+});
+
+// Tietueen luonti ja muokkaus sisäisillä kenttänimillä. Arvot tarkistetaan kentän tyypin, valintojen ja
+// viittausten mukaan. Vain luku -taulut (loki, kirjautumiset, käyttäjät, sanakirja) eivät ole muokattavissa.
+function writableTable(req: express.Request, res: express.Response) {
+  const table = tableOr404(req, res);
+  if (!table) return undefined;
+  if (table.read_only) {
+    res.status(403).json({ error: "Tämän taulun tietueita ei voi muokata täällä." });
+    return undefined;
+  }
+  return table;
+}
+
+function writeError(error: unknown, res: express.Response) {
+  if (error instanceof RecordError) return res.status(400).json({ error: error.message });
+  const code = (error as { code?: string })?.code ?? "";
+  if (code.startsWith("SQLITE_CONSTRAINT")) {
+    return res.status(400).json({ error: code === "SQLITE_CONSTRAINT_PRIMARYKEY" || code === "SQLITE_CONSTRAINT_UNIQUE"
+      ? "Samalla tunnisteella on jo tietue." : "Tietueen arvot eivät kelpaa tietokannalle." });
+  }
+  throw error;
+}
+
+const recordBody = z.record(z.string(), z.unknown());
+
+sysRouter.post("/now/table/:table", requireAdmin, (req, res) => {
+  const table = writableTable(req, res);
+  if (!table) return;
+  const parsed = recordBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Virheellinen tietue." });
+  const fields = getFields(table.name);
+  const key = keyField(fields)!;
+  try {
+    const values = recordValues(table, fields, parsed.data, "create", actorName(res));
+    const columns = [...values.keys()];
+    db.prepare(`INSERT INTO "${table.physical_name}" (${columns.map(column => `"${column}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`)
+      .run(...values.values());
+    const keyValue = values.get(key.column_name);
+    const row = db.prepare(`SELECT * FROM "${table.physical_name}" WHERE "${key.column_name}" = ?`).get(keyValue) as Record<string, unknown>;
+    audit(actorName(res), "table_record_created", { table: table.name, key: keyValue, fields: Object.keys(parsed.data) });
+    res.status(201).json({ result: toRecord(fields, row) });
+  } catch (error) {
+    writeError(error, res);
+  }
+});
+
+sysRouter.patch("/now/table/:table/:sysId", requireAdmin, (req, res) => {
+  const table = writableTable(req, res);
+  if (!table) return;
+  const parsed = recordBody.safeParse(req.body);
+  if (!parsed.success || Object.keys(parsed.data).length === 0) return res.status(400).json({ error: "Anna muutettavat kentät." });
+  const fields = getFields(table.name);
+  const key = keyField(fields)!;
+  const where = `WHERE "${key.column_name}" = ?`;
+  const keyValue = key.internal_type === "integer" ? Number(req.params.sysId) : req.params.sysId;
+  if (!db.prepare(`SELECT 1 FROM "${table.physical_name}" ${where}`).get(keyValue)) return res.status(404).json({ error: "Tietuetta ei löytynyt." });
+  try {
+    const values = recordValues(table, fields, parsed.data, "update", actorName(res));
+    db.prepare(`UPDATE "${table.physical_name}" SET ${[...values.keys()].map(column => `"${column}" = ?`).join(", ")} ${where}`)
+      .run(...values.values(), keyValue);
+    const row = db.prepare(`SELECT * FROM "${table.physical_name}" ${where}`).get(keyValue) as Record<string, unknown>;
+    audit(actorName(res), "table_record_updated", { table: table.name, key: keyValue, fields: Object.keys(parsed.data) });
+    res.json({ result: toRecord(fields, row) });
+  } catch (error) {
+    writeError(error, res);
+  }
 });

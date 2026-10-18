@@ -45,7 +45,7 @@ Lähde: Kiito – tuotespeksi V1 (projektin aiempi nimi). Päivitetty 12.10.2026
 
 **Käyttäjät ja tietosuoja**
 - Roolit pääkäyttäjä, isännöitsijä ja asiakaspalvelu; yhtiökohtainen näkyvyys palvelimella
-- Taulut ja kentät (vain pääkäyttäjä): jokaisen taulun ja kentän sisäinen nimi ServiceNow'n tapaan (esim. u_ticket.assigned_to), nimet suomeksi ja englanniksi, tyypit, viittaukset ja valinnat; tietueiden haku sisäisillä nimillä koodatulla haulla
+- Taulut ja kentät (vain pääkäyttäjä): jokaisen taulun ja kentän sisäinen nimi ServiceNow'n tapaan (esim. u_ticket.assigned_to), nimet suomeksi ja englanniksi, tyypit, viittaukset ja valinnat; tietueiden haku sisäisillä nimillä koodatulla haulla sekä tietueiden muokkaus ja luonti (loki, kirjautumiset, käyttäjät ja sanakirja vain luku)
 - Perustiedot (vain pääkäyttäjä): hätäsanat, arkaluonteisuuden tunnistussanat, maskaus, määräajat prioriteetin mukaan ja AI-mallit toiminnoittain
 - Käyttäjän poisto, asukkaan tietojen vienti ja poisto; poistopyynnössä avoimen tehtävän voi säilyttää perusteella (esim. kesken oleva vahinko), ja se anonymisoidaan suljettaessa
 - Säilytysaika suljetuille tehtäville ja lokille
