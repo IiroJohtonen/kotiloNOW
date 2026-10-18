@@ -5,6 +5,7 @@ import { isAdmin, requireManager, setResidentPassword } from "../auth.js";
 import { deleteBookingsAndRelease } from "../booking-queue.js";
 import { db } from "../db.js";
 import { ACTIVE_RESIDENT, id, now, today } from "../util.js";
+import { clearCustomFields, customFieldValues } from "../sys-dictionary.js";
 import {
   deferTicketErasure, ERASED_NAME, eraseResidentFromTicket, openResidentTickets, removeAttachmentFiles, residentTicketIds,
   sentByResident
@@ -256,7 +257,8 @@ residentsRouter.get("/residents/:residentId/export", requireManager, (req, res) 
         JOIN apartments a ON a.id = r.apartment_id
         WHERE r.id = ?
       `).get(resident.id) as Record<string, unknown>),
-      has_portal_account: Boolean(db.prepare("SELECT 1 FROM resident_credentials WHERE resident_id = ?").get(resident.id))
+      has_portal_account: Boolean(db.prepare("SELECT 1 FROM resident_credentials WHERE resident_id = ?").get(resident.id)),
+      custom_fields: customFieldValues("residents", "id", resident.id)
     },
     tickets,
     bookings: db.prepare("SELECT resource, starts_at, ends_at, note, created_at FROM bookings WHERE resident_id = ? ORDER BY starts_at").all(resident.id),
@@ -355,6 +357,7 @@ residentsRouter.delete("/residents/:residentId", requireManager, async (req, res
     db.prepare("DELETE FROM parking_assignments WHERE resident_id = ? AND end_date <= start_date").run(resident.id);
     db.prepare("UPDATE parking_spaces SET resident_id = NULL WHERE resident_id = ?").run(resident.id);
 
+    clearCustomFields("residents", "id", resident.id);
     db.prepare("UPDATE residents SET name = ?, email = NULL, moved_out_at = ?, erased_at = ? WHERE id = ?").run(
       ERASED_NAME,
       resident.moved_out_at && resident.moved_out_at < date ? resident.moved_out_at : date,

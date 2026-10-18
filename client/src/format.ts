@@ -82,6 +82,8 @@ export function actionLabel(action: string) {
     table_records_viewed: t("Taulun tietueita katsottu"),
     table_record_created: t("Taulun tietue luotu"),
     table_record_updated: t("Taulun tietuetta muokattu"),
+    custom_field_created: t("Oma kenttä lisätty"),
+    custom_field_deleted: t("Oma kenttä poistettu"),
     retention_purge: t("Säilytysajan ylittäneet tiedot poistettu"),
     master_data_updated: t("Perustietoja muutettu"),
     sensitive_marked: t("Merkitty arkaluonteiseksi"),

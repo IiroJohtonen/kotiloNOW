@@ -29,6 +29,7 @@ type SysField = {
   defaultValue: string | null;
   secret: boolean;
   readOnly: boolean;
+  custom?: boolean;
 };
 
 type SysChoice = { element: string; value: string; label: string; labelEn: string; sequence: number };
@@ -150,16 +151,36 @@ function TableView({ name, onBack, onOpen, onRenamed }: {
   const [tab, setTab] = useState<"fields" | "records">("fields");
   const [editingTable, setEditingTable] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  function load() {
+    return api<TableDetail>(`/sys/tables/${encodeURIComponent(name)}`)
+      .then(setDetail)
+      .catch(() => setError(t("Taulun lataus epäonnistui.")));
+  }
 
   useEffect(() => {
     setDetail(null);
     setTab("fields");
     setEditing(null);
     setEditingTable(false);
-    api<TableDetail>(`/sys/tables/${encodeURIComponent(name)}`)
-      .then(setDetail)
-      .catch(() => setError(t("Taulun lataus epäonnistui.")));
+    setAdding(false);
+    setNotice("");
+    load();
   }, [name]);
+
+  async function removeField(field: SysField) {
+    if (!window.confirm(t("Poistetaanko kenttä {0}? Kentän arvot poistuvat kaikista tietueista pysyvästi.", field.element))) return;
+    try {
+      await api(`/sys/tables/${encodeURIComponent(name)}/fields/${encodeURIComponent(field.element)}`, { method: "DELETE" });
+      setEditing(null);
+      setNotice(t("Kenttä {0} poistettu.", field.element));
+      await load();
+    } catch (caught) {
+      window.alert(errorMessage(caught, t("Kentän poisto epäonnistui.")));
+    }
+  }
 
   if (!detail) {
     return (
@@ -209,6 +230,26 @@ function TableView({ name, onBack, onOpen, onRenamed }: {
         </button>
       </div>
 
+      {tab === "fields" && (
+        <div className="dictionary-field-actions">
+          {notice && <p className="dictionary-saved">{notice}</p>}
+          {!table.readOnly && !adding && (
+            <button type="button" className="secondary" onClick={() => { setNotice(""); setAdding(true); }}>{t("+ Lisää kenttä")}</button>
+          )}
+          {table.readOnly && <p className="muted dictionary-help">{t("Tähän tauluun ei voi lisätä omia kenttiä.")}</p>}
+        </div>
+      )}
+      {tab === "fields" && adding && (
+        <NewFieldForm
+          table={table.name}
+          onCancel={() => setAdding(false)}
+          onCreated={async field => {
+            setAdding(false);
+            setNotice(t("Kenttä {0} lisätty.", field.element));
+            await load();
+          }}
+        />
+      )}
       {tab === "fields" ? (
         <div className="table-card">
           <table className="data-table dictionary-table">
@@ -230,21 +271,31 @@ function TableView({ name, onBack, onOpen, onRenamed }: {
                         path={`/sys/tables/${encodeURIComponent(table.name)}/fields/${encodeURIComponent(field.element)}`}
                         item={field}
                         withDescription
+                        withMandatory={field.custom}
                         onCancel={() => setEditing(null)}
                         onSaved={saved => {
                           setDetail({ ...detail, fields: fields.map(item => (item.element === field.element ? { ...item, ...saved } : item)) });
                           setEditing(null);
                         }}
                       />
-                      {fieldChoices.length > 0 && (
+                      {(fieldChoices.length > 0 || (field.custom && field.type === "choice")) && (
                         <ChoiceList
                           table={table.name}
+                          element={field.element}
+                          custom={!!field.custom}
                           choices={fieldChoices}
                           onSaved={saved => setDetail({
                             ...detail,
                             choices: choices.map(choice => (choice.element === saved.element && choice.value === saved.value ? { ...choice, ...saved } : choice))
                           })}
+                          onChanged={load}
                         />
+                      )}
+                      {field.custom && (
+                        <div className="dictionary-danger">
+                          <button type="button" className="secondary danger" onClick={() => removeField(field)}>{t("Poista kenttä")}</button>
+                          <small className="muted">{t("Poisto hävittää kentän arvot kaikista tietueista.")}</small>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -260,6 +311,7 @@ function TableView({ name, onBack, onOpen, onRenamed }: {
                     <td>
                       <strong>{labelOf(field)}</strong>
                       {field.mandatory && <span className="dictionary-flag" title={t("Pakollinen")}>*</span>}
+                      {field.custom && <span className="dictionary-badge">{t("Oma kenttä")}</span>}
                       {field.description && <small className="dictionary-description">{field.description}</small>}
                       {fieldChoices.length > 0 && (
                         <small className="dictionary-description">
@@ -298,13 +350,16 @@ function TableView({ name, onBack, onOpen, onRenamed }: {
   );
 }
 
-function LabelForm({ path, item, withDescription, onCancel, onSaved }: {
+function LabelForm({ path, item, withDescription, withMandatory, onCancel, onSaved }: {
   path: string;
-  item: { label: string; labelEn: string; description?: string };
+  item: { label: string; labelEn: string; description?: string; mandatory?: boolean };
   withDescription?: boolean;
+  // Itse lisätyn kentän pakollisuutta voi muuttaa.
+  withMandatory?: boolean;
   onCancel: () => void;
-  onSaved: (saved: { label: string; labelEn: string; description: string }) => void;
+  onSaved: (saved: { label: string; labelEn: string; description: string; mandatory?: boolean }) => void;
 }) {
+  const [mandatory, setMandatory] = useState(!!item.mandatory);
   const [label, setLabel] = useState(item.label);
   const [labelEn, setLabelEn] = useState(item.labelEn);
   const [description, setDescription] = useState(item.description ?? "");
@@ -316,9 +371,16 @@ function LabelForm({ path, item, withDescription, onCancel, onSaved }: {
     setSaving(true);
     setError("");
     try {
-      const body = withDescription ? { label, labelEn, description } : { label, labelEn };
-      const saved = await api<{ label: string; labelEn: string; description?: string }>(path, { method: "PATCH", body: JSON.stringify(body) });
-      onSaved({ label: saved.label, labelEn: saved.labelEn, description: saved.description ?? description });
+      const body = {
+        label, labelEn,
+        ...(withDescription ? { description } : {}),
+        ...(withMandatory ? { mandatory } : {})
+      };
+      const saved = await api<{ label: string; labelEn: string; description?: string; mandatory?: boolean }>(path, { method: "PATCH", body: JSON.stringify(body) });
+      onSaved({
+        label: saved.label, labelEn: saved.labelEn, description: saved.description ?? description,
+        ...(withMandatory ? { mandatory: saved.mandatory } : {})
+      });
     } catch (caught) {
       setError(errorMessage(caught, t("Tallennus epäonnistui.")));
     } finally {
@@ -342,6 +404,12 @@ function LabelForm({ path, item, withDescription, onCancel, onSaved }: {
           <textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={1000} rows={2} />
         </label>
       )}
+      {withMandatory && (
+        <label className="dictionary-check">
+          <input type="checkbox" checked={mandatory} onChange={event => setMandatory(event.target.checked)} />
+          <span>{t("Pakollinen uusissa ja muokatuissa tietueissa")}</span>
+        </label>
+      )}
       {error && <p className="send-error">{error}</p>}
       <div className="draft-actions">
         <button className="primary" type="submit" disabled={saving}>{saving ? t("Tallennetaan…") : t("Tallenna")}</button>
@@ -351,12 +419,41 @@ function LabelForm({ path, item, withDescription, onCancel, onSaved }: {
   );
 }
 
-function ChoiceList({ table, choices, onSaved }: {
+function ChoiceList({ table, element, custom, choices, onSaved, onChanged }: {
   table: string;
+  element: string;
+  custom: boolean;
   choices: SysChoice[];
   onSaved: (choice: Pick<SysChoice, "element" | "value" | "label" | "labelEn">) => void;
+  onChanged: () => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ value: "", label: "", labelEn: "" });
+  const [error, setError] = useState("");
+  const base = `/sys/tables/${encodeURIComponent(table)}/fields/${encodeURIComponent(element)}/choices`;
+
+  async function add(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      await api(base, { method: "POST", body: JSON.stringify({ ...draft, labelEn: draft.labelEn || draft.label }) });
+      setDraft({ value: "", label: "", labelEn: "" });
+      onChanged();
+    } catch (caught) {
+      setError(errorMessage(caught, t("Valinnan lisäys epäonnistui.")));
+    }
+  }
+
+  async function remove(value: string) {
+    setError("");
+    try {
+      await api(`${base}/${encodeURIComponent(value)}`, { method: "DELETE" });
+      onChanged();
+    } catch (caught) {
+      setError(errorMessage(caught, t("Valinnan poisto epäonnistui.")));
+    }
+  }
+
   return (
     <div className="dictionary-choices">
       <h3>{t("Valinnat")}</h3>
@@ -365,7 +462,7 @@ function ChoiceList({ table, choices, onSaved }: {
           <li key={choice.value}>
             {editing === choice.value ? (
               <LabelForm
-                path={`/sys/tables/${encodeURIComponent(table)}/fields/${encodeURIComponent(choice.element)}/choices/${encodeURIComponent(choice.value)}`}
+                path={`${base}/${encodeURIComponent(choice.value)}`}
                 item={choice}
                 onCancel={() => setEditing(null)}
                 onSaved={saved => {
@@ -374,14 +471,192 @@ function ChoiceList({ table, choices, onSaved }: {
                 }}
               />
             ) : (
-              <button type="button" className="link-button" onClick={() => setEditing(choice.value)} title={t("Muokkaa valinnan nimeä")}>
-                <code>{choice.value}</code> = {labelOf(choice)}
-              </button>
+              <>
+                <button type="button" className="link-button" onClick={() => setEditing(choice.value)} title={t("Muokkaa valinnan nimeä")}>
+                  <code>{choice.value}</code> = {labelOf(choice)}
+                </button>
+                {custom && choices.length > 1 && (
+                  <button type="button" className="link-button dictionary-remove" onClick={() => remove(choice.value)} title={t("Poista valinta")}>
+                    {t("Poista")}
+                  </button>
+                )}
+              </>
             )}
           </li>
         ))}
       </ul>
+      {custom && (
+        <form className="dictionary-toolbar dictionary-choice-add" onSubmit={add}>
+          <input value={draft.value} onChange={event => setDraft({ ...draft, value: event.target.value })} placeholder={t("Arvo, esim. yard")} aria-label={t("Arvo")} required maxLength={60} />
+          <input value={draft.label} onChange={event => setDraft({ ...draft, label: event.target.value })} placeholder={t("Nimi suomeksi")} aria-label={t("Nimi suomeksi")} required maxLength={80} />
+          <input value={draft.labelEn} onChange={event => setDraft({ ...draft, labelEn: event.target.value })} placeholder={t("Nimi englanniksi")} aria-label={t("Nimi englanniksi")} maxLength={80} />
+          <button type="submit" className="secondary">{t("Lisää valinta")}</button>
+        </form>
+      )}
+      {error && <p className="send-error">{error}</p>}
     </div>
+  );
+}
+
+const customTypes = ["string", "integer", "decimal", "boolean", "glide_date", "glide_date_time", "choice", "reference"];
+
+// Sisäinen nimi nimestä: u_ ja pienet kirjaimet ilman ääkkösiä, esim. "Vastuuhenkilö" → u_vastuuhenkilo.
+function suggestElement(label: string) {
+  const slug = label.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^(\d)/, "f$1").slice(0, 38);
+  return slug ? `u_${slug}` : "u_";
+}
+
+// Uusi oma kenttä: nimi, sisäinen nimi (u_), tyyppi, valinnat tai viitattu taulu, oletusarvo ja pakollisuus.
+function NewFieldForm({ table, onCancel, onCreated }: { table: string; onCancel: () => void; onCreated: (field: SysField) => void }) {
+  const [label, setLabel] = useState("");
+  const [labelEn, setLabelEn] = useState("");
+  const [element, setElement] = useState("u_");
+  const [elementTouched, setElementTouched] = useState(false);
+  const [type, setType] = useState("string");
+  const [reference, setReference] = useState("");
+  const [defaultValue, setDefaultValue] = useState("");
+  const [mandatory, setMandatory] = useState(false);
+  const [description, setDescription] = useState("");
+  const [choiceRows, setChoiceRows] = useState([{ value: "", label: "", labelEn: "" }]);
+  const [tables, setTables] = useState<SysTable[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (type === "reference" && tables.length === 0) api<SysTable[]>("/sys/tables").then(setTables).catch(() => setTables([]));
+  }, [type, tables.length]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const choices = choiceRows.filter(row => row.value.trim()).map(row => ({ ...row, labelEn: row.labelEn || row.label || row.value, label: row.label || row.value }));
+      const field = await api<SysField>(`/sys/tables/${encodeURIComponent(table)}/fields`, {
+        method: "POST",
+        body: JSON.stringify({
+          element, label, labelEn: labelEn || label, description, type, mandatory,
+          reference: type === "reference" ? reference : null,
+          defaultValue: type === "boolean" ? (defaultValue === "1" ? "1" : "0") : defaultValue || null,
+          choices: type === "choice" ? choices : undefined
+        })
+      });
+      onCreated(field);
+    } catch (caught) {
+      setError(errorMessage(caught, t("Kentän lisäys epäonnistui.")));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const choiceValues = choiceRows.filter(row => row.value.trim());
+  return (
+    <form className="ticket-form dictionary-record-form dictionary-new-field" onSubmit={submit}>
+      <h3>{t("Uusi oma kenttä")}</h3>
+      <p className="muted dictionary-help">
+        {t("Oman kentän sisäinen nimi alkaa u_, kuten ServiceNow'ssa. Kenttä näkyy tietueissa ja hauissa heti tallennuksen jälkeen.")}
+      </p>
+      <div className="dictionary-record-fields">
+        <label>
+          <span>{t("Nimi suomeksi")}</span>
+          <input
+            value={label}
+            onChange={event => {
+              setLabel(event.target.value);
+              if (!elementTouched) setElement(suggestElement(event.target.value));
+            }}
+            maxLength={80}
+            required
+          />
+        </label>
+        <label>
+          <span>{t("Nimi englanniksi")}</span>
+          <input value={labelEn} onChange={event => setLabelEn(event.target.value)} maxLength={80} placeholder={label} />
+        </label>
+        <label>
+          <span>{t("Sisäinen nimi")}</span>
+          <input
+            className="dictionary-query"
+            value={element}
+            onChange={event => { setElementTouched(true); setElement(event.target.value.toLowerCase()); }}
+            pattern="u_[a-z][a-z0-9_]{0,38}"
+            title={t("u_ ja pieniä kirjaimia, numeroita tai alaviivoja")}
+            required
+          />
+        </label>
+        <label>
+          <span>{t("Tyyppi")}</span>
+          <select value={type} onChange={event => { setType(event.target.value); setDefaultValue(""); }}>
+            {customTypes.map(value => <option key={value} value={value}>{typeLabels[value]}</option>)}
+          </select>
+        </label>
+        {type === "reference" && (
+          <label>
+            <span>{t("Viittaa tauluun")}</span>
+            <select value={reference} onChange={event => setReference(event.target.value)} required>
+              <option value="">{t("Valitse")}</option>
+              {tables.map(item => <option key={item.name} value={item.name}>{labelOf(item)} ({item.name})</option>)}
+            </select>
+          </label>
+        )}
+        {type !== "reference" && (
+          <label>
+            <span>{t("Oletusarvo")}</span>
+            {type === "boolean" ? (
+              <select value={defaultValue} onChange={event => setDefaultValue(event.target.value)}>
+                <option value="0">{t("Ei")}</option>
+                <option value="1">{t("Kyllä")}</option>
+              </select>
+            ) : type === "choice" ? (
+              <select value={defaultValue} onChange={event => setDefaultValue(event.target.value)}>
+                <option value="">–</option>
+                {choiceValues.map(row => <option key={row.value} value={row.value}>{row.label || row.value}</option>)}
+              </select>
+            ) : (
+              <input
+                type={type === "glide_date" ? "date" : type === "integer" || type === "decimal" ? "number" : "text"}
+                step={type === "decimal" ? "any" : undefined}
+                value={defaultValue}
+                onChange={event => setDefaultValue(event.target.value)}
+                placeholder={t("Tyhjä = ei oletusarvoa")}
+              />
+            )}
+          </label>
+        )}
+        <label className="dictionary-check dictionary-record-check">
+          <input type="checkbox" checked={mandatory} onChange={event => setMandatory(event.target.checked)} />
+          <span>{t("Pakollinen")}</span>
+        </label>
+        <label>
+          <span>{t("Kuvaus")}</span>
+          <textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={1000} rows={2} />
+        </label>
+      </div>
+      {type === "choice" && (
+        <div className="dictionary-choices">
+          <h3>{t("Valinnat")}</h3>
+          {choiceRows.map((row, index) => (
+            <div className="dictionary-toolbar dictionary-choice-add" key={index}>
+              <input value={row.value} onChange={event => setChoiceRows(rows => rows.map((item, i) => (i === index ? { ...item, value: event.target.value } : item)))} placeholder={t("Arvo, esim. yard")} aria-label={t("Arvo")} maxLength={60} />
+              <input value={row.label} onChange={event => setChoiceRows(rows => rows.map((item, i) => (i === index ? { ...item, label: event.target.value } : item)))} placeholder={t("Nimi suomeksi")} aria-label={t("Nimi suomeksi")} maxLength={80} />
+              <input value={row.labelEn} onChange={event => setChoiceRows(rows => rows.map((item, i) => (i === index ? { ...item, labelEn: event.target.value } : item)))} placeholder={t("Nimi englanniksi")} aria-label={t("Nimi englanniksi")} maxLength={80} />
+              {choiceRows.length > 1 && (
+                <button type="button" className="link-button dictionary-remove" onClick={() => setChoiceRows(rows => rows.filter((_, i) => i !== index))}>{t("Poista")}</button>
+              )}
+            </div>
+          ))}
+          <button type="button" className="link-button" onClick={() => setChoiceRows(rows => [...rows, { value: "", label: "", labelEn: "" }])}>
+            {t("+ Lisää valinta")}
+          </button>
+        </div>
+      )}
+      {error && <p className="send-error">{error}</p>}
+      <div className="draft-actions">
+        <button className="primary" type="submit" disabled={saving}>{saving ? t("Tallennetaan…") : t("Lisää kenttä")}</button>
+        <button type="button" className="secondary" onClick={onCancel}>{t("Peruuta")}</button>
+      </div>
+    </form>
   );
 }
 

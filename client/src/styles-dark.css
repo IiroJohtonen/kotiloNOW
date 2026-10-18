@@ -2331,3 +2331,21 @@
     background: #1f2732;
     color: #b8c0ca
 }
+:root[data-theme="dark"] .dictionary-new-field {
+    border: 1px solid #384454
+}
+:root[data-theme="dark"] .dictionary-badge {
+    background: #2e3a48;
+    color: #9fc2e4
+}
+:root[data-theme="dark"] .dictionary-remove {
+    color: #ea9e96
+}
+:root[data-theme="dark"] .dictionary-danger {
+    border-top: 1px solid #3b4858
+}
+:root[data-theme="dark"] .dictionary-danger .secondary.danger {
+    color: #ea9e96;
+    background: #49342f;
+    border-color: #71463d
+}

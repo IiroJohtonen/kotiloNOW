@@ -4870,3 +4870,14 @@ a.button-link { display: inline-flex; align-items: center; color: inherit; text-
 .dictionary-record-check { align-self: end; padding-bottom: 10px; font-size: 12px; font-weight: 700; color: #4b535d; }
 .dictionary-toolbar .secondary { padding: 9px 14px; font-size: 12px; font-weight: 600; }
 .dictionary-record-fields input:disabled { background: #f1f2f3; color: #6b7280; }
+.dictionary-field-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 12px; }
+.dictionary-field-actions:empty { display: none; }
+.dictionary-field-actions .secondary { padding: 8px 14px; font-size: 12px; font-weight: 600; }
+.dictionary-field-actions .dictionary-saved, .dictionary-field-actions .dictionary-help { margin: 0; }
+.dictionary-new-field { margin: 0 0 16px; padding: 16px; border: 1px solid #e2e4e6; border-radius: 12px; }
+.dictionary-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: #eaf2fb; color: #24527f; font-size: 11px; font-weight: 600; }
+.dictionary-choice-add { margin: 6px 0; }
+.dictionary-choice-add input { flex: 1 1 140px; min-width: 0; }
+.dictionary-remove { margin-left: 10px; color: #9c2b1f; font-weight: 500; font-size: 12px; }
+.dictionary-danger { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #eeeff1; }
+.dictionary-danger .secondary.danger { padding: 7px 12px; font-size: 12px; font-weight: 600; color: #9c2b1f; background: #fbeae6; border-color: #f0c9c0; }

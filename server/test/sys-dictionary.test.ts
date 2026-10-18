@@ -122,4 +122,66 @@ describe("järjestelmän sanakirja", () => {
     const options = (await call(server, admin, "GET", "/sys/tables/u_apartment/options?q=C%207")).data as any[];
     assert.ok(options.some(option => option.value === created.data.result.sys_id && option.label === "C 7"));
   });
+
+  it("pääkäyttäjä lisää oman u_-kentän, ja sitä käytetään kuten muita kenttiä", async () => {
+    const base = "/sys/tables/u_ticket/fields";
+    assert.equal((await call(server, manager, "POST", base, { element: "u_cost", label: "Kustannus", labelEn: "Cost", type: "decimal" })).status, 403);
+    assert.equal((await call(server, admin, "POST", base, { element: "cost", label: "Kustannus", labelEn: "Cost", type: "decimal" })).status, 400);
+    assert.equal((await call(server, admin, "POST", base, { element: "u_area", label: "Alue", labelEn: "Area", type: "choice" })).status, 400);
+    assert.equal((await call(server, admin, "POST", base, { element: "u_owner", label: "Omistaja", labelEn: "Owner", type: "reference", reference: "x" })).status, 400);
+    assert.equal((await call(server, admin, "POST", "/sys/tables/sys_audit/fields", { element: "u_x", label: "X", labelEn: "X", type: "string" })).status, 400);
+
+    const area = await call(server, admin, "POST", base, {
+      element: "u_area", label: "Alue", labelEn: "Area", type: "choice", mandatory: true, defaultValue: "indoor",
+      choices: [{ value: "indoor", label: "Sisätilat", labelEn: "Indoors" }, { value: "yard", label: "Piha", labelEn: "Yard" }]
+    });
+    assert.equal(area.status, 201);
+    assert.deepEqual([area.data.custom, area.data.type, area.data.mandatory, area.data.defaultValue], [true, "choice", true, "indoor"]);
+    assert.equal((await call(server, admin, "POST", base, { element: "u_area", label: "Alue", labelEn: "Area", type: "string" })).status, 400);
+    const owner = await call(server, admin, "POST", base, { element: "u_owner", label: "Vastuuhenkilö", labelEn: "Owner", type: "reference", reference: "sys_user" });
+    assert.equal(owner.status, 201);
+
+    // Sovelluksen omat lisäykset toimivat edelleen, ja vanhat rivit saavat oletusarvon.
+    const created = await call(server, admin, "POST", "/inbound/messages", { companyId: "demo-company", senderName: "Asukas", subject: "Ovi", body: "Ovi narisee.", channel: "email" });
+    assert.equal(created.status, 201);
+    const record = (await call(server, admin, "GET", `/now/table/u_ticket/${created.data.ticketId}`)).data.result;
+    assert.equal(record.u_area, "indoor");
+
+    const path = `/now/table/u_ticket/${created.data.ticketId}`;
+    assert.equal((await call(server, admin, "PATCH", path, { u_area: "kellari" })).status, 400);
+    assert.equal((await call(server, admin, "PATCH", path, { u_area: "" })).status, 400);
+    assert.equal((await call(server, admin, "PATCH", path, { u_owner: "ei-ole" })).status, 400);
+    assert.equal((await call(server, admin, "POST", "/sys/tables/u_ticket/fields/u_area/choices", { value: "roof", label: "Katto", labelEn: "Roof" })).status, 201);
+    const saved = await call(server, admin, "PATCH", path, { u_area: "roof" });
+    assert.equal(saved.data.result.u_area, "roof");
+    assert.equal((await call(server, admin, "GET", `/now/table/u_ticket?sysparm_query=u_area=roof`)).data.total, 1);
+
+    const restarted = await startServer({ dataDir: server.dataDir });
+    try {
+      const adminAgain = await login(restarted, ADMIN_EMAIL);
+      const fields = (await call(restarted, adminAgain, "GET", "/sys/tables/u_ticket")).data.fields as any[];
+      const kept = fields.find(field => field.element === "u_area");
+      assert.deepEqual([kept.type, kept.mandatory, kept.custom], ["choice", true, true]);
+    } finally {
+      await restarted.stop();
+    }
+
+    assert.equal((await call(server, admin, "DELETE", "/sys/tables/u_ticket/fields/subject")).status, 400);
+    assert.equal((await call(server, admin, "DELETE", "/sys/tables/u_ticket/fields/u_owner")).status, 200);
+    const after = (await call(server, admin, "GET", path)).data.result;
+    assert.ok(!("u_owner" in after) && after.u_area === "roof");
+    const log = (await call(server, admin, "GET", "/audit")).data as any[];
+    assert.ok(log.some(row => row.action === "custom_field_created") && log.some(row => row.action === "custom_field_deleted"));
+  });
+
+  it("asukkaan omat kentät tulevat tietojen vientiin ja tyhjenevät poistossa", async () => {
+    assert.equal((await call(server, admin, "POST", "/sys/tables/u_resident/fields", { element: "u_phone", label: "Puhelin", labelEn: "Phone", type: "string" })).status, 201);
+    const resident = await call(server, admin, "POST", "/now/table/u_resident", { company: "demo-company", apartment: "apt-12", name: "Testi Asukas", u_phone: "040 111 2222" });
+    assert.equal(resident.status, 201);
+    const id = resident.data.result.sys_id;
+    const exported = (await call(server, manager, "GET", `/residents/${id}/export`)).data;
+    assert.deepEqual(exported.resident.custom_fields, [{ field: "u_phone", label: "Puhelin", value: "040 111 2222" }]);
+    assert.equal((await call(server, manager, "DELETE", `/residents/${id}`)).status, 200);
+    assert.equal((await call(server, admin, "GET", `/now/table/u_resident/${id}`)).data.result.u_phone, null);
+  });
 });

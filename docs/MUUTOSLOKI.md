@@ -3,6 +3,27 @@
 Jokaisesta päivityksestä kirjataan päivämäärä, mitä muutettiin ja miten. Testitapaukset ja niiden
 tulokset ovat testaussivulla: https://claude.ai/artifact/9ioRJQ7LnYLHtmq6WHi3ri
 
+## 18.10.2026 · Omat u_-kentät ServiceNow'n tapaan
+
+**Mitä muutettiin**
+- Pääkäyttäjä voi lisätä tauluun oman kentän: nimi suomeksi ja englanniksi, sisäinen nimi (alkaa u_), tyyppi,
+  kuvaus, oletusarvo ja pakollisuus.
+- Tyypit: teksti, kokonaisluku, desimaaliluku, kyllä/ei, päivämäärä, päivämäärä ja aika, valinta (omat valinnat)
+  ja viittaus toiseen tauluun.
+- Oma kenttä näkyy heti tietueissa, lomakkeessa ja hauissa Oma kenttä -merkillä. Oletusarvo tulee myös vanhoille
+  ja sovelluksen itse luomille tietueille.
+- Omalle valintakentälle voi lisätä ja poistaa valintoja, pakollisuutta voi muuttaa, ja kentän voi poistaa
+  (arvot poistuvat pysyvästi).
+- Kenttiä voi lisätä vain tauluihin, joiden tietueita voi muokata (ei lokiin, käyttäjiin, kirjautumisiin eikä sanakirjaan).
+- Asukkaan omat kentät tulevat asukkaan tietojen vientiin ja tyhjenevät, kun asukkaan tiedot poistetaan; samoin
+  tehtävän omat kentät, kun tehtävä anonymisoidaan.
+- Kentän lisäys ja poisto kirjataan lokiin.
+
+**Miten**
+- Asetukset → Isännöitsijätoimiston tiedot → Taulut ja kentät → avaa taulu → + Lisää kenttä. Muokkaus ja poisto: paina kentän riviä.
+
+**Testit:** T-096–T-099
+
 ## 18.10.2026 · Tietueiden muokkaus ja luonti Taulut ja kentät -näkymässä
 
 **Mitä muutettiin**

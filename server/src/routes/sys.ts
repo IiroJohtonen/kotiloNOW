@@ -3,7 +3,8 @@ import { z } from "zod";
 import { requireAdmin } from "../auth.js";
 import { db } from "../db.js";
 import {
-  buildQuery, displayField, getFields, getTable, keyField, QueryError, RecordError, recordValues, type SysTable, toRecord
+  addCustomField, buildQuery, CUSTOM_ELEMENT, CUSTOM_TYPES, deleteCustomField, displayField, getFields, getTable, keyField,
+  QueryError, RecordError, recordValues, type SysTable, toRecord
 } from "../sys-dictionary.js";
 import { id, now } from "../util.js";
 
@@ -43,7 +44,8 @@ function tableOr404(req: express.Request, res: express.Response): SysTable | und
 const fieldJson = (field: ReturnType<typeof getFields>[number]) => ({
   element: field.element, columnName: field.column_name, label: field.label, labelEn: field.label_en,
   description: field.description, type: field.internal_type, reference: field.reference, mandatory: !!field.mandatory,
-  primaryKey: !!field.primary_key, defaultValue: field.default_value, secret: !!field.secret, readOnly: !!field.read_only
+  primaryKey: !!field.primary_key, defaultValue: field.default_value, secret: !!field.secret, readOnly: !!field.read_only,
+  custom: !!field.custom
 });
 
 sysRouter.get("/sys/tables/:table", requireAdmin, (req, res) => {
@@ -87,13 +89,15 @@ sysRouter.patch("/sys/tables/:table/fields/:element", requireAdmin, (req, res) =
   if (!table) return;
   const field = getFields(table.name).find(item => item.element === req.params.element);
   if (!field) return res.status(404).json({ error: "Kenttää ei löytynyt." });
-  const parsed = labelsSchema.safeParse(req.body);
+  const parsed = labelsSchema.extend({ mandatory: z.boolean().optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Tarkista kentän tiedot." });
+  if (parsed.data.mandatory !== undefined && !field.custom) return res.status(400).json({ error: "Vain itse lisätyn kentän pakollisuutta voi muuttaa." });
   const { label = field.label, labelEn = field.label_en, description = field.description } = parsed.data;
-  db.prepare("UPDATE sys_dictionary SET label = ?, label_en = ?, description = ?, updated_at = ? WHERE table_name = ? AND element = ?")
-    .run(label, labelEn, description, now(), table.name, field.element);
+  const mandatory = parsed.data.mandatory === undefined ? field.mandatory : Number(parsed.data.mandatory);
+  db.prepare("UPDATE sys_dictionary SET label = ?, label_en = ?, description = ?, mandatory = ?, updated_at = ? WHERE table_name = ? AND element = ?")
+    .run(label, labelEn, description, mandatory, now(), table.name, field.element);
   audit(actorName(res), "dictionary_updated", { table: table.name, element: field.element, fields: Object.keys(parsed.data) });
-  res.json(fieldJson({ ...field, label, label_en: labelEn, description }));
+  res.json(fieldJson({ ...field, label, label_en: labelEn, description, mandatory }));
 });
 
 sysRouter.patch("/sys/tables/:table/fields/:element/choices/:value", requireAdmin, (req, res) => {
@@ -235,4 +239,96 @@ sysRouter.patch("/now/table/:table/:sysId", requireAdmin, (req, res) => {
   } catch (error) {
     writeError(error, res);
   }
+});
+
+// Omat kentät (u_-alkuiset): lisäys, poisto ja valintojen ylläpito. Poisto hävittää kentän arvot kaikista tietueista.
+const choiceSchema = z.object({
+  value: z.string().trim().min(1).max(60),
+  label: z.string().trim().min(1).max(80),
+  labelEn: z.string().trim().min(1).max(80)
+});
+
+const customFieldSchema = z.object({
+  element: z.string().trim().regex(CUSTOM_ELEMENT),
+  label: z.string().trim().min(1).max(80),
+  labelEn: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(1000).default(""),
+  type: z.enum(CUSTOM_TYPES),
+  reference: z.string().nullish(),
+  mandatory: z.boolean().default(false),
+  defaultValue: z.union([z.string(), z.number(), z.boolean()]).nullish().transform(value => (value === null || value === undefined ? value : String(value))),
+  choices: z.array(choiceSchema).max(100).optional()
+});
+
+sysRouter.post("/sys/tables/:table/fields", requireAdmin, (req, res) => {
+  const table = tableOr404(req, res);
+  if (!table) return;
+  const parsed = customFieldSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const element = parsed.error.issues.some(issue => issue.path[0] === "element");
+    return res.status(400).json({ error: element
+      ? "Sisäisen nimen pitää alkaa u_ ja sisältää vain pieniä kirjaimia, numeroita ja alaviivoja."
+      : "Tarkista kentän tiedot." });
+  }
+  try {
+    const field = addCustomField(table, parsed.data);
+    audit(actorName(res), "custom_field_created", { table: table.name, element: field.element, type: field.internal_type });
+    res.status(201).json(fieldJson(field));
+  } catch (error) {
+    if (error instanceof RecordError) return res.status(400).json({ error: error.message });
+    throw error;
+  }
+});
+
+function customFieldOr404(req: express.Request, res: express.Response) {
+  const table = tableOr404(req, res);
+  if (!table) return undefined;
+  const field = getFields(table.name).find(item => item.element === req.params.element);
+  if (!field) {
+    res.status(404).json({ error: "Kenttää ei löytynyt." });
+    return undefined;
+  }
+  if (!field.custom) {
+    res.status(400).json({ error: "Vain itse lisättyä kenttää voi muuttaa näin." });
+    return undefined;
+  }
+  return { table, field };
+}
+
+sysRouter.delete("/sys/tables/:table/fields/:element", requireAdmin, (req, res) => {
+  const found = customFieldOr404(req, res);
+  if (!found) return;
+  deleteCustomField(found.table, found.field);
+  audit(actorName(res), "custom_field_deleted", { table: found.table.name, element: found.field.element });
+  res.json({ ok: true });
+});
+
+sysRouter.post("/sys/tables/:table/fields/:element/choices", requireAdmin, (req, res) => {
+  const found = customFieldOr404(req, res);
+  if (!found) return;
+  if (found.field.internal_type !== "choice") return res.status(400).json({ error: "Kenttä ei ole valintakenttä." });
+  const parsed = choiceSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Tarkista valinta." });
+  const exists = db.prepare("SELECT 1 FROM sys_choice WHERE table_name = ? AND element = ? AND value = ?")
+    .get(found.table.name, found.field.element, parsed.data.value);
+  if (exists) return res.status(400).json({ error: "Valinta on jo olemassa." });
+  const sequence = (db.prepare("SELECT COALESCE(MAX(sequence), -10) + 10 AS next FROM sys_choice WHERE table_name = ? AND element = ?")
+    .get(found.table.name, found.field.element) as { next: number }).next;
+  db.prepare("INSERT INTO sys_choice (table_name, element, value, label, label_en, sequence) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(found.table.name, found.field.element, parsed.data.value, parsed.data.label, parsed.data.labelEn, sequence);
+  audit(actorName(res), "dictionary_updated", { table: found.table.name, element: found.field.element, value: parsed.data.value });
+  res.status(201).json({ element: found.field.element, ...parsed.data, sequence });
+});
+
+sysRouter.delete("/sys/tables/:table/fields/:element/choices/:value", requireAdmin, (req, res) => {
+  const found = customFieldOr404(req, res);
+  if (!found) return;
+  const count = (db.prepare("SELECT COUNT(*) AS count FROM sys_choice WHERE table_name = ? AND element = ?")
+    .get(found.table.name, found.field.element) as { count: number }).count;
+  if (count <= 1) return res.status(400).json({ error: "Valintakentällä pitää olla vähintään yksi valinta." });
+  const removed = db.prepare("DELETE FROM sys_choice WHERE table_name = ? AND element = ? AND value = ?")
+    .run(found.table.name, found.field.element, req.params.value).changes;
+  if (!removed) return res.status(404).json({ error: "Valintaa ei löytynyt." });
+  audit(actorName(res), "dictionary_updated", { table: found.table.name, element: found.field.element, removedValue: req.params.value });
+  res.json({ ok: true });
 });

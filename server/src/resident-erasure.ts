@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { attachmentsDir, db } from "./db.js";
 import { id, now } from "./util.js";
+import { clearCustomFields } from "./sys-dictionary.js";
 
 // ---------------------------------------------------------------------------------------------
 // Asukkaan tietojen poisto tehtävistä (tietosuoja-asetuksen poistopyyntö). Avoimen tehtävän voi
@@ -70,6 +71,7 @@ export function eraseResidentFromTicket(ticketId: string, resident: ErasedReside
     db.prepare("UPDATE messages SET body = ?, subject = ? WHERE ticket_id = ? AND channel != 'contractor'").run(ERASED_TEXT, ERASED_TEXT, ticketId);
     db.prepare("UPDATE messages SET sender = ? WHERE ticket_id = ? AND direction = 'inbound'").run(ERASED_NAME, ticketId);
     db.prepare("UPDATE tickets SET draft = '', subject = ?, summary = '', ai_reason = '' WHERE id = ?").run(ERASED_TEXT, ticketId);
+    clearCustomFields("tickets", "id", ticketId);
     const files = db.prepare(
       "SELECT id FROM attachments WHERE ticket_id = ? AND direction IN ('inbound', 'portal')"
     ).all(ticketId) as { id: string }[];

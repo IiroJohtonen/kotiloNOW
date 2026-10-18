@@ -62,6 +62,11 @@ for (const table of ["sys_db_object", "sys_dictionary"]) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0`);
   }
 }
+// Pääkäyttäjän itse lisäämät kentät (u_-alkuiset, kuten ServiceNow'ssa). Niiden tyyppi, viittaus, oletusarvo
+// ja pakollisuus ovat pääkäyttäjän määrittelemiä, joten käynnistyksen täydennys ei muuta niitä.
+if (!(db.prepare("PRAGMA table_info(sys_dictionary)").all() as { name: string }[]).some(column => column.name === "custom")) {
+  db.exec("ALTER TABLE sys_dictionary ADD COLUMN custom INTEGER NOT NULL DEFAULT 0");
+}
 
 // Tietokannan taulu → [sisäinen nimi, nimi, nimi englanniksi, kuvaus]. sys_-alkuiset ovat järjestelmän
 // omia tauluja (käyttäjät, istunnot, loki), u_-alkuiset isännöinnin tietoja kuten ServiceNow'n omat taulut.
@@ -476,7 +481,7 @@ export type SysTable = {
 export type SysField = {
   table_name: string; element: string; column_name: string; label: string; label_en: string; description: string;
   internal_type: string; reference: string | null; mandatory: number; primary_key: number; default_value: string | null;
-  secret: number; position: number; active: number; read_only: number;
+  secret: number; position: number; active: number; read_only: number; custom: number;
 };
 
 type ColumnInfo = { name: string; type: string; notnull: number; dflt_value: string | null; pk: number };
@@ -537,8 +542,11 @@ export function syncDictionary() {
       VALUES (@table, @element, @column, @label, @labelEn, @type, @reference, @mandatory, @primaryKey, @defaultValue,
          @secret, @readOnly, @position, 1, @stamp, @stamp)
       ON CONFLICT(table_name, column_name) DO UPDATE SET
-        internal_type = excluded.internal_type, reference = excluded.reference, mandatory = excluded.mandatory,
-        primary_key = excluded.primary_key, default_value = excluded.default_value, secret = excluded.secret,
+        internal_type = CASE WHEN custom = 1 THEN internal_type ELSE excluded.internal_type END,
+        reference = CASE WHEN custom = 1 THEN reference ELSE excluded.reference END,
+        mandatory = CASE WHEN custom = 1 THEN mandatory ELSE excluded.mandatory END,
+        default_value = CASE WHEN custom = 1 THEN default_value ELSE excluded.default_value END,
+        primary_key = excluded.primary_key, secret = excluded.secret,
         read_only = excluded.read_only, position = excluded.position, active = 1
     `);
     for (const physical of physicalTables) {
@@ -715,7 +723,7 @@ export function recordValues(
   return values;
 }
 
-function fieldValue(table: SysTable, field: SysField, raw: unknown): unknown {
+function fieldValue(table: SysTable, field: SysField, raw: unknown, allowedChoices?: string[]): unknown {
   const empty = raw === null || raw === undefined || raw === "";
   if (empty) {
     if (field.mandatory && !["string", "json"].includes(field.internal_type)) throw new RecordError(`Pakollinen kenttä puuttuu: ${field.element}`);
@@ -749,8 +757,8 @@ function fieldValue(table: SysTable, field: SysField, raw: unknown): unknown {
       }
       return text;
     case "choice": {
-      const allowed = (db.prepare("SELECT value FROM sys_choice WHERE table_name = ? AND element = ?").all(table.name, field.element) as
-        { value: string }[]).map(row => row.value);
+      const allowed = allowedChoices ?? (db.prepare("SELECT value FROM sys_choice WHERE table_name = ? AND element = ?")
+        .all(table.name, field.element) as { value: string }[]).map(row => row.value);
       if (allowed.length && !allowed.includes(text)) throw new RecordError(`Kentän ${field.element} arvo ei ole sallittu valinta.`);
       return text;
     }
@@ -766,4 +774,101 @@ function fieldValue(table: SysTable, field: SysField, raw: unknown): unknown {
       if (text.length > 20000) throw new RecordError(`Kentän ${field.element} arvo on liian pitkä.`);
       return typeof raw === "string" ? raw : text;
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Omat kentät: pääkäyttäjä lisää tauluun u_-alkuisen kentän. Tietokantaan tulee sarake samalla nimellä.
+// Sarake sallii tyhjän arvon, jotta sovelluksen omat lisäykset toimivat; pakollisuus tarkistetaan
+// tietueiden muokkauksessa. Kenttiä voi lisätä vain tauluihin, joiden tietueita voi muokata.
+// ---------------------------------------------------------------------------------------------
+export const CUSTOM_TYPES = ["string", "integer", "decimal", "boolean", "glide_date", "glide_date_time", "choice", "reference"] as const;
+export type CustomType = typeof CUSTOM_TYPES[number];
+export const CUSTOM_ELEMENT = /^u_[a-z][a-z0-9_]{0,38}$/;
+
+export type CustomFieldInput = {
+  element: string; label: string; labelEn: string; description: string; type: CustomType; reference?: string | null;
+  mandatory: boolean; defaultValue?: string | null; choices?: { value: string; label: string; labelEn: string }[];
+};
+
+const SQL_TYPES: Record<CustomType, string> = {
+  string: "TEXT", integer: "INTEGER", decimal: "REAL", boolean: "INTEGER", glide_date: "TEXT", glide_date_time: "TEXT",
+  choice: "TEXT", reference: "TEXT"
+};
+
+function sqlLiteral(value: unknown) {
+  return typeof value === "number" ? String(value) : `'${String(value).replace(/'/g, "''")}'`;
+}
+
+export function addCustomField(table: SysTable, input: CustomFieldInput) {
+  if (table.read_only) throw new RecordError("Tähän tauluun ei voi lisätä kenttiä.");
+  if (!CUSTOM_ELEMENT.test(input.element)) {
+    throw new RecordError("Sisäisen nimen pitää alkaa u_ ja sisältää vain pieniä kirjaimia, numeroita ja alaviivoja.");
+  }
+  const columns = (db.prepare(`PRAGMA table_info("${table.physical_name}")`).all() as ColumnInfo[]).map(column => column.name);
+  if (columns.includes(input.element) || db.prepare("SELECT 1 FROM sys_dictionary WHERE table_name = ? AND element = ?").get(table.name, input.element)) {
+    throw new RecordError("Taulussa on jo kenttä tällä nimellä.");
+  }
+  let reference: string | null = null;
+  if (input.type === "reference") {
+    const target = getTable(input.reference ?? "");
+    if (!target || !keyField(getFields(target.name))) throw new RecordError("Valitse taulu, johon kenttä viittaa.");
+    reference = target.name;
+  }
+  const choices = input.type === "choice" ? (input.choices ?? []) : [];
+  if (input.type === "choice" && choices.length === 0) throw new RecordError("Anna valintakentälle vähintään yksi valinta.");
+  if (new Set(choices.map(choice => choice.value)).size !== choices.length) throw new RecordError("Valintojen arvot eivät saa toistua.");
+
+  const field: SysField = {
+    table_name: table.name, element: input.element, column_name: input.element, label: input.label, label_en: input.labelEn,
+    description: input.description, internal_type: input.type, reference, mandatory: input.mandatory ? 1 : 0, primary_key: 0,
+    default_value: null, secret: 0, position: 0, active: 1, read_only: 0, custom: 1
+  };
+  const hasDefault = input.defaultValue !== undefined && input.defaultValue !== null && input.defaultValue !== "";
+  const defaultValue = hasDefault ? fieldValue(table, { ...field, mandatory: 0 }, input.defaultValue, choices.map(choice => choice.value)) : null;
+  const stamp = new Date().toISOString();
+  db.transaction(() => {
+    db.exec(`ALTER TABLE "${table.physical_name}" ADD COLUMN "${input.element}" ${SQL_TYPES[input.type]}${hasDefault ? ` DEFAULT ${sqlLiteral(defaultValue)}` : ""}`);
+    const position = (db.prepare("SELECT COALESCE(MAX(position), 0) + 1 AS next FROM sys_dictionary WHERE table_name = ?").get(table.name) as { next: number }).next;
+    db.prepare(`
+      INSERT INTO sys_dictionary
+        (table_name, element, column_name, label, label_en, description, internal_type, reference, mandatory, primary_key, default_value,
+         secret, read_only, custom, position, active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 1, ?, 1, ?, ?)
+    `).run(table.name, input.element, input.element, input.label, input.labelEn, input.description, input.type, reference,
+      field.mandatory, hasDefault ? String(defaultValue) : null, position, stamp, stamp);
+    const insertChoice = db.prepare("INSERT INTO sys_choice (table_name, element, value, label, label_en, sequence) VALUES (?, ?, ?, ?, ?, ?)");
+    choices.forEach((choice, index) => insertChoice.run(table.name, input.element, choice.value, choice.label, choice.labelEn, index * 10));
+  })();
+  return getFields(table.name).find(item => item.element === input.element)!;
+}
+
+export function deleteCustomField(table: SysTable, field: SysField) {
+  if (!field.custom) throw new RecordError("Vain itse lisätyn kentän voi poistaa.");
+  db.transaction(() => {
+    db.exec(`ALTER TABLE "${table.physical_name}" DROP COLUMN "${field.column_name}"`);
+    db.prepare("DELETE FROM sys_dictionary WHERE table_name = ? AND element = ?").run(table.name, field.element);
+    db.prepare("DELETE FROM sys_choice WHERE table_name = ? AND element = ?").run(table.name, field.element);
+  })();
+}
+
+function customFields(physical: string) {
+  return db.prepare(`
+    SELECT d.* FROM sys_dictionary d JOIN sys_db_object t ON t.name = d.table_name
+    WHERE t.physical_name = ? AND d.custom = 1 AND d.active = 1 ORDER BY d.position
+  `).all(physical) as SysField[];
+}
+
+// Omat kentät nimineen ja arvoineen (esim. asukkaan tietojen vientiin).
+export function customFieldValues(physical: string, keyColumn: string, key: string) {
+  const fields = customFields(physical);
+  if (fields.length === 0) return [];
+  const row = db.prepare(`SELECT * FROM "${physical}" WHERE "${keyColumn}" = ?`).get(key) as Record<string, unknown> | undefined;
+  return fields.map(field => ({ field: field.element, label: field.label, value: row?.[field.column_name] ?? null }));
+}
+
+// Tyhjentää omat kentät, kun henkilön tiedot poistetaan: niihin on voitu kirjoittaa henkilötietoja.
+export function clearCustomFields(physical: string, keyColumn: string, key: string) {
+  const fields = customFields(physical);
+  if (fields.length === 0) return;
+  db.prepare(`UPDATE "${physical}" SET ${fields.map(field => `"${field.column_name}" = NULL`).join(", ")} WHERE "${keyColumn}" = ?`).run(key);
 }
